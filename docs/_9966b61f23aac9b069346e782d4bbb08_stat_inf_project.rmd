@@ -1,0 +1,220 @@
+---
+title: "Statistical inference with the GSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(pwr)
+```
+
+### Load data
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+* * *
+
+## Part 1: Data
+
+The General Social Survey (GSS) has been monitoring societal change and studying the growing complexity of American society since 1972. The GSS aims to gather data on contemporary American society in order to monitor and explain trends and constants in attitudes, behaviors, and attributes; to examine the structure and functioning of society in general as well as the role played by relevant subgroups; to compare the United States to other societies in order to place American society in comparative perspective and develop cross-national models of human society; and to make high-quality data easily accessible to scholars, students, policy makers, and others, with minimal cost and waiting.
+
+The target population of the GSS is adults (18+) living in households in the United States. The GSS sample is drawn using an area probability design that randomly selects respondents in households across the United States to take part in the survey. Respondents that become part of the GSS sample are from a mix of urban, suburban, and rural geographic areas. Participation in the study is strictly voluntary.Between 1500 to 2500 are interviewed in the main study.The survey is conducted face-to-face. Under some conditions when it has proved difficult to arrange an in-person interview with a sampled respondent, GSS interviews may be conducted by telephone. GSS questions cover a diverse range of issues including national spending priorities, marijuana use, crime and punishment, race relations, quality of life, confidence in institutions, and sexual behavior. This dataset cover the results from 1972 to 2012
+
+**Collected method:** The GSS use a multistage sample method where random units (metropolitan o rnot metropolitan areas) are selected. Then clusters are random selected inside this units, after this a random samples of house is selected insde the cluster where a random adult is selected. During the sample process the cluster are stratified (by race, ethnicity and finally income) in order to ensure a representantion of all areas and groups from the population.
+
+**Data generalisability:** Data was collected random for all US population, so it can be generalisable to all US population.
+
+**Data causality:** Data was collected via voluntary survey with out any random assigment to the factors under consideration, representing an observation methodology, so the data only supports conclusions based on associations. The data is also succepted to non-respond bias.  Wording experiments are used in order to limit bias due to the question phrasing.
+
+* * *
+
+## Part 2: Research question
+
+Between 1972 and 2012, did a different proportion of American adults who reported living with below-average-income families when they were sixteen report above-average income today based on their educational level?
+
+Relevance: Economic mobility is a measure of how difficult it is for members of the lowest socioeconomic status to move up to a higher status during their lifetime. There are many reasons to be concerned with mobility measures to analyze the functioning of a society, such as the amount of money one starts out with does not change one's chances of moving up in socioeconomic status. One of the factors suggested to increase mobility is education. This question addresses the potential impact of education for people who come from poor families to see what impact, if any, a college education may have on future socioeconomic status.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+First let explore our data a little, since we have multiple years on our dataset, we will need to calculate the average value on income for every year to consider the rising levels in the incomes per year.
+
+```{r}
+avg_income_year <- gss %>% 
+  group_by(year) %>% 
+  summarize(avg_income = mean(coninc, na.rm=TRUE), ci = qnorm(0.975)*sd(coninc , na.rm = TRUE)/sqrt(n()))
+
+avg_income_year %>% 
+   ggplot(aes(x = year, y = avg_income)) +
+            geom_line() +
+            geom_point(shape=21, color="black", fill="#69b3a2", size=4)+
+            geom_ribbon(aes(ymin=avg_income - ci, ymax=avg_income + ci), alpha=0.3)
+```
+
+We can see that the average income increase over the years, the grey shadow represent the confidence interval for the values. Lets see how is the distribution of incomes for some of the years in the study to see the variability in our sample.
+
+```{r}
+gss %>% 
+  group_by(year) %>%
+  filter(year %in% c(1974, 1994, 2008) ,!is.na (coninc)) %>%
+  mutate(avg_income = mean(coninc, na.rm=TRUE)) %>% 
+  ggplot(aes(x = coninc)) +
+            geom_histogram(bins=10, aes(y=..density..), colour="black", fill="white")+
+            geom_density(alpha=.6, fill="#FF6666")+
+            geom_vline(aes(xintercept = avg_income), colour = 'blue', linetype="dashed", size=1)+
+            facet_wrap(~year)
+```
+
+We can in general see that the plots are right skewed and bi modal , since some individuals are making higher incomes than the average. It also seems that the wage gap grows over the years.
+
+Let's filter our data to consider only people who reported below-average income when they were sixteen. An important factor in educational level is age. So lest we first investigate the age distribution of our data frame. Normally people finish school at 17-18 and start their career immediately. If the person carries out a technical study, it will take between 1 and 2 years, however, in the case of an undergraduate, it will take a minimum of 4 years. So we will put an age limit of 25 years for our analysis.
+
+```{r}
+#We are going to prepare a data frame to work with the data we need.
+filterdata <- gss %>% 
+  filter(incom16 %in% c("Far Below Average", "Below Average")) %>% 
+  filter(!is.na(coninc)) %>% 
+  filter(!is.na(degree)) %>% 
+  filter(age >= 25) %>% 
+  select(caseid, year, age, sex, race, degree, incom16, coninc) %>% 
+  mutate(college = ifelse((degree == "Lt High School" | degree == "High School"), "No College Degree", "College Degree")) %>% 
+  inner_join(avg_income_year, by ='year') %>% 
+  mutate(income_today = ifelse(coninc >= avg_income, "Above Average", "Not Above Average"))
+```
+
+
+```{r}
+filterdata %>% 
+  ggplot(aes(x = age))+
+  geom_histogram(bins = 64, aes(y=..density..),colour="black", fill="white")+
+  geom_density(alpha=.6, fill="#FF6666")+
+  geom_vline(aes(xintercept = mean(age)), colour = 'blue', linetype="dashed", size=1)
+
+filterdata %>% 
+  ggplot(aes(x = age, color = degree, fill = degree))+
+  geom_density(alpha=0.2)+
+  scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+```
+
+We see that the plot is right skewed with the mean near 48. Now lets investigate which number of people have in each category of education. Lets also see how is the evolution of income according to the education level a person have (is important to note, that we had to use a categorical variable here to account for difference in incomes between the years for people with same education level). 
+
+```{r}
+filterdata %>% 
+  ggplot(aes(x=degree))+
+  geom_bar()
+
+filterdata %>% 
+  ggplot(aes(x=degree, fill = income_today))+
+  geom_bar(position = "fill")
+```
+
+We see that majority of people have grades under *High School* and *Lt High School*. Also We can see that in general as the level of education increase the incomes increase over the average. This difference suggests that Level of college education is associated with reporting an above average income. The analysis will proceed with hypothesis testing to determine the statistical significance of this possible association.
+
+* * *
+
+## Part 4: Inference
+
+The proper method for conducting an inferential analysis for two categorical variable with more than two levels each is an chi-square test. There are 2 conditions for a chi-square test: (i) the data must be independent, this means that they were randomly sampled. Each observation in the data set represents a single, unique adult, and all other knowledge of the sampling procedure suggests that each sample is independent of each other. In addition, the survey population of all US adults is at least 10-20 times larger than the sample size. These assumptions ensure that each adult in the data represents IID samples. The second condition needed for a valid chi-square test is a Sample size greater than 5 for each case.
+
+```{r}
+table(filterdata$income_today, filterdata$degree) 
+```
+
+In this case, the number of observations is greater than 5 for each category, fulfilling requirement (ii). The chi-square test of independence will check if there are variables that are independent of each other. The null hypothesis that the incomes and the level of degree from a person are independent, the level of incomes not vary by degree level. The alternative hypothesis is that there incomes and the degree level are dependent, the level of income vary by degree level.
+
+```{r}
+chisq.test(filterdata$income_today, filterdata$degree)
+```
+We have a high chi-squared value and a p-value of less than 0.05 significance level. So we reject the null hypothesis and conclude that the income and degree have a significant relationship.
+
+We are going to explore this relationship a little more, so we are going to use the data from 2012 to make some more inference. For the data of the 2012 we are going to make an analysis of variance ("ANOVA"). There are three conditions necessary to do an ANOVA: (i) Independence, (ii) normality and (iii) equal variance.
+
+```{r}
+#lets create a new datafram that include only the 2012 data.
+filterdata_2012 <- filterdata %>% 
+  filter(year == 2012)
+```
+
+```{r}
+#Now lets plot the data in a normality plot to evaluate normality.
+ggplot(filterdata_2012, aes(sample = coninc)) +
+  stat_qq()+
+  stat_qq_line()+
+  facet_grid(~degree)
+
+#And finally plot a box plot to evaluate variance between groups.
+ggplot(filterdata_2012, aes(x = degree, y = coninc)) +
+  geom_boxplot()
+```
+
+As we suggest early, the sampling procedure ensure that each sample is independent of each other. The normal probability plots for each education group show that the data is right skewed and deviates from normality, this is mitigated by the large sample sizes (>50) for each education group. The box plots of incomes across education levels show roughly equal variance for the High School, Junior College and Bachelor groups, while the less than High School group has lower variance and the Graduate group has higher variance. To adress this, a non-parametric test can be used. The conditions on normality and constant variance are not fully respected.
+
+We use ANOVA in our hypotheses test, but we report the uncertainty in the results. The null hypotheisis is that there is no significant difference between means of income between multiple groups based on highest educational level and the alternate hypothesis is that there is a significant difference between means of income between multiple groups based on highest education level.
+
+```{r}
+aov(coninc ~ degree, data = filterdata_2012) %>% 
+  summary()
+```
+Since the overall p-value (2e-16) is less than .05, this is an indication that each group does not have the same average income. Next, we will perform pairwise t-tests using Bonferroni’s correction for the p-values to calculate pairwise differences between the income of each group.
+
+```{r}
+pairwise.t.test(filterdata_2012$coninc, filterdata_2012$degree, p.adjust.method="bonferroni")
+```
+Based on the output, we can see that aren't significant difference between Bachelor-Graduate groups and Junior College-High school group (The difference of the means of this pair is not statistically significant). 
+
+Before drawing final conclusions, the effect size (Cohen’s h) and the power are calculated for the chi-square test.
+
+```{r}
+#ref:https://cran.r-project.org/web/packages/pwr/vignettes/pwr-vignette.html
+#Create a table with proportions
+prop_table <- with(filterdata, table(filterdata$income_today, filterdata$degree)) %>% prop.table()
+#calculate effect size for chi-square tests
+ES.w2(prop_table)
+#calculate the power for chi-square tests
+pwr.chisq.test(w = ES.w2(prop_table), N = 11813, df = 4, sig.level = 0.05)
+```
+```{r}
+#https://stats.stackexchange.com/questions/558313/calculating-power-for-anova-for-unequal-sample-size
+#https://stats.stackexchange.com/questions/388110/how-to-conduct-power-analysis-for-unbalanced-one-way-anova-in-r
+```
+
+
+For The chi-square test of independence the power of the test is 100%. 
+
+## Conclusions
+
+Research Question: Between 1972 and 2012, did a different proportion of American adults who reported living with below-average-income families when they were sixteen report above-average income today based on their educational level?
+
+Yes, a statistically significant difference in proportions exists between US adults raised in below average income families who has an above average income today according to their education level. In 2012, there is a positive relationship between higher education level and income, however this is not true for all levels, for example there is not statistically significant difference between the incomes from persons that have a Junior College-High school or persons that have a Bachelor-Graduate. The median income value from a person with bachelor is nearly twice that of someone with a junior college with a difference of $28'725 US. 
+
+One shortcoming of this study is that total income family, instead of personal income, was used in the study as the measure for income. Further randomized studies should assess the extent to which education affects one’s future income status, especially for those raised in low-income families. These studies should control for the possible confounding variables present in the GSS data, like age, sex, and race.
+
+
+## Appendix A: ANOVA test with no assumption of equal variances
+
+```{r}
+oneway.test(coninc ~ degree, data = filterdata_2012)
+
+pairwise.t.test(filterdata_2012$coninc, filterdata_2012$degree, p.adjust.method="bonferroni", pool.sd = FALSE)
+```
+
+## Appendix B: Non-parametric alternative to one-way ANOVA test
+
+```{r}
+kruskal.test(coninc ~ degree, data = filterdata_2012)
+```
+
